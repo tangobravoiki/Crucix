@@ -4,6 +4,8 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
 
 permissions:
   contents: write
@@ -17,11 +19,46 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Copy dashboard to deploy folder
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --omit=dev
+
+      - name: Run data sweep and export static data.json
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          FIRMS_MAP_KEY: ${{ secrets.FIRMS_MAP_KEY }}
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_IDS: ${{ secrets.TELEGRAM_CHANNEL_IDS }}
+        run: |
+          node scripts/sweep.mjs --export-json > /tmp/sweep_data.json 2>&1 || true
+          if [ -f sweep_data.json ]; then
+            mv sweep_data.json /tmp/data.json
+          elif node -e "require('fs').readFileSync('/tmp/sweep_data.json'); process.exit(0)" 2>/dev/null; then
+            cp /tmp/sweep_data.json /tmp/data.json || echo '{}' > /tmp/data.json
+          else
+            echo '{}' > /tmp/data.json
+          fi
+
+      - name: Build static site
         run: |
           mkdir -p _site
           cp dashboard/public/jarvis.html _site/index.html
           cp dashboard/public/loading.html _site/loading.html 2>/dev/null || true
+          cp -r dashboard/public/locales _site/locales 2>/dev/null || true
+          # Patch index.html: redirect fetch('/api/data') to ./data.json
+          sed -i "s|fetch('/api/data')|fetch('./data.json')|g" _site/index.html
+          # Embed static data.json
+          if [ -s /tmp/data.json ]; then
+            cp /tmp/data.json _site/data.json
+          fi
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
