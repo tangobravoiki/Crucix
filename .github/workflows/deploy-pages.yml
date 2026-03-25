@@ -47,10 +47,13 @@ jobs:
           cp dashboard/public/jarvis.html _site/index.html
           cp dashboard/public/loading.html _site/loading.html 2>/dev/null || true
           cp -r dashboard/public/locales _site/locales 2>/dev/null || true
-          # Patch: redirect fetch('/api/data') to static data.json
+          # Patch 1: redirect fetch('/api/data') to static data.json
           sed -i "s|fetch('/api/data')|fetch('./data.json')|g" _site/index.html
-          # Also patch: location.protocol check so Pages loads data even on https
-          sed -i "s|location.protocol === 'file:'|false|g" _site/index.html
+          # Patch 2: treat https as file mode so inline data path is used
+          # Replace canProbeApi check so static data.json fetch works on GitHub Pages
+          sed -i "s|location.protocol !== 'file:'|true|g" _site/index.html
+          # Patch 3: disable SSE (no server on Pages)
+          sed -i "s|connectSSE()||g" _site/index.html
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
