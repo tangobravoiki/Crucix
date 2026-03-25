@@ -15,6 +15,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: npm ci --omit=dev
 
-      - name: Run data sweep and export static data.json
+      - name: Run data sweep
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           FIRMS_MAP_KEY: ${{ secrets.FIRMS_MAP_KEY }}
@@ -38,27 +39,18 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_IDS: ${{ secrets.TELEGRAM_CHANNEL_IDS }}
         run: |
-          node scripts/sweep.mjs --export-json > /tmp/sweep_data.json 2>&1 || true
-          if [ -f sweep_data.json ]; then
-            mv sweep_data.json /tmp/data.json
-          elif node -e "require('fs').readFileSync('/tmp/sweep_data.json'); process.exit(0)" 2>/dev/null; then
-            cp /tmp/sweep_data.json /tmp/data.json || echo '{}' > /tmp/data.json
-          else
-            echo '{}' > /tmp/data.json
-          fi
+          mkdir -p _site
+          node scripts/export-static.mjs _site/data.json || echo '{"error":"sweep failed"}' > _site/data.json
 
       - name: Build static site
         run: |
-          mkdir -p _site
           cp dashboard/public/jarvis.html _site/index.html
           cp dashboard/public/loading.html _site/loading.html 2>/dev/null || true
           cp -r dashboard/public/locales _site/locales 2>/dev/null || true
-          # Patch index.html: redirect fetch('/api/data') to ./data.json
+          # Patch: redirect fetch('/api/data') to static data.json
           sed -i "s|fetch('/api/data')|fetch('./data.json')|g" _site/index.html
-          # Embed static data.json
-          if [ -s /tmp/data.json ]; then
-            cp /tmp/data.json _site/data.json
-          fi
+          # Also patch: location.protocol check so Pages loads data even on https
+          sed -i "s|location.protocol === 'file:'|false|g" _site/index.html
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
